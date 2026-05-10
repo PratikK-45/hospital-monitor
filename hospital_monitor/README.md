@@ -1,114 +1,198 @@
 # ICU Patient Vital Signs Monitor
 
-A simulation-based Linux systems project demonstrating process control,
-IPC, threads, signals, and file I/O — no hardware required.
+A Linux systems programming project written in C that simulates an ICU patient monitoring system using:
 
-## Scenario
+- Processes (`fork`, `execl`)
+- Threads (`pthread`)
+- IPC (`pipe`, shared memory, semaphores)
+- Signals
+- File I/O
 
-Three ICU patients are monitored continuously. A sensor simulator
-generates random vitals (heart rate, SpO2, temperature, blood pressure)
-every second. A parent process reads and displays them live. An alert
-engine watches for out-of-range values and prints warnings. Everything
-is logged to `logs/vitals.log`.
+The system continuously generates patient vitals, displays them live, logs them to a file, and raises alerts when readings go outside safe ranges.
 
-## Architecture
+---
 
-```
-Parent Process (monitor)
-│
-├── Child 1: sensor          — generates vitals → writes to pipe
-├── Child 2: alert_engine    — reads shared memory → prints alerts
-│
-├── Thread: reader           — reads pipe → writes shared memory
-├── Thread: display          — prints live vitals table (mutex + condvar)
-└── Thread: logger           — writes to vitals.log every 2s (lseek)
-```
+# Features
 
-IPC mechanisms:
-- **pipe()** — sensor child → reader thread (unidirectional byte stream)
-- **shared memory + semaphore** — reader thread → alert_engine child
+- Real-time patient vital simulation
+- Multi-process architecture
+- Multi-threaded monitoring
+- Shared memory communication
+- Alert system for dangerous vitals
+- Continuous log file updates
+- Clean shutdown handling with signals
 
-## Build & Run
+---
 
-```bash
-make all       # compile all three binaries
-make run       # start the monitor (Ctrl+C to stop)
-make test      # 15-second automated run + print log
-make clean     # remove binaries and logs
-```
+# Architecture
 
-Requires: gcc, POSIX shared memory (`-lrt`), pthreads (`-lpthread`).
-
-## Signals
-
-| Signal   | How to send            | Effect                        |
-|----------|------------------------|-------------------------------|
-| SIGINT   | Ctrl+C                 | Graceful shutdown             |
-| SIGUSR1  | `kill -USR1 <PID>`     | Print manual snapshot header  |
-| SIGALRM  | auto every 10 s        | Log periodic summary          |
-
-## System Calls Used
-
-| Category  | Calls                                              |
-|-----------|----------------------------------------------------|
-| File I/O  | open, write, read, lseek, close                    |
-| Process   | fork, execl, waitpid, exit, getpid                 |
-| Threads   | pthread_create/join, mutex_lock/unlock, cond_wait/signal |
-| IPC       | pipe, shm_open, mmap, munmap, sem_open/wait/post   |
-| Signals   | sigaction, alarm, kill, pause                      |
-
-## Sample Output
-
-```
-╔══════════════════════════════════════════╗
-║      ICU Patient Vital Signs Monitor     ║
-║  Press Ctrl+C to stop. SIGUSR1=snapshot  ║
-╚══════════════════════════════════════════╝
-
-[monitor] PID=12345 | sensor PID=12346 | alert PID=12347
-
-━━━ ICU Vital Signs (live) ━━━
-  Pat.   Heart Rate  SpO2      Temp(°C)   BP(mmHg)
-  ------ ----------  --------  ---------- ----------
-  P1     78          98        36.8       118
-  P2     112         91        38.2       155
-  P3     55          97        37.1       102
-
-  [ALERT] Patient 2: Heart Rate 112 bpm (normal 60–100)
-  [ALERT] Patient 2: SpO2 91% (normal >=95%)
-  [WARN]  Patient 2: Temp 38.2°C (normal 36.5–37.5)
-  [WARN]  Patient 2: BP 155 mmHg (normal 90–140)
-  [ALERT] Patient 3: Heart Rate 55 bpm (normal 60–100)
+```text
+sensor process
+      │
+      ▼
+   pipe()
+      │
+      ▼
+reader thread ──► shared memory ──► alert_engine process
+      │
+      ├──► display thread
+      └──► logger thread
 ```
 
-## Log File Format
+---
 
-The first 64 bytes of `logs/vitals.log` are a header updated in-place
-via `lseek(fd, 0, SEEK_SET)` each flush cycle:
+# Components
 
-```
-ICU_LOG records=42
-[14:05:01] P1 | HR= 78 bpm | SpO2= 98% | Temp=36.8°C | BP=118 mmHg
-...
-```
+## Processes
 
-## Project Structure
+| Process | Role |
+|---|---|
+| `monitor` | Main controller process |
+| `sensor` | Generates random patient vitals |
+| `alert_engine` | Detects abnormal readings |
 
-```
+---
+
+## Threads (inside monitor)
+
+| Thread | Role |
+|---|---|
+| Reader | Reads data from pipe and updates shared memory |
+| Display | Prints live patient vitals |
+| Logger | Writes vitals to `logs/vitals.log` |
+
+---
+
+# IPC Used
+
+| IPC Mechanism | Purpose |
+|---|---|
+| `pipe()` | Sensor → monitor communication |
+| Shared Memory | Share latest vitals |
+| POSIX Semaphore | Synchronize shared memory access |
+
+---
+
+# Signals
+
+| Signal | Action |
+|---|---|
+| `SIGINT` | Clean shutdown |
+| `SIGUSR1` | Print snapshot |
+| `SIGALRM` | Periodic log summary |
+
+---
+
+# Project Structure
+
+```text
 hospital_monitor/
 ├── Makefile
 ├── README.md
 ├── include/
-│   ├── vitals.h         ← shared structs, constants, thresholds
-│   ├── ipc_utils.h      ← IPC globals and function declarations
-│   └── logger.h         ← log file API
-├── src/
-│   ├── main.c           ← parent process, signal handling, lifecycle
-│   ├── sensor.c         ← Child 1: random vitals generator
-│   ├── alert_engine.c   ← Child 2: threshold checker
-│   ├── threads.c        ← reader / display / logger threads
-│   ├── ipc_utils.c      ← pipe, shm_open, semaphore helpers
-│   └── logger.c         ← open / write / lseek / close
-└── logs/
-    └── vitals.log       ← generated at runtime
+│   ├── vitals.h
+│   ├── ipc_utils.h
+│   └── logger.h
+└── src/
+    ├── main.c
+    ├── sensor.c
+    ├── alert_engine.c
+    ├── threads.c
+    ├── ipc_utils.c
+    └── logger.c
 ```
+
+---
+
+# Build & Run
+
+## Install dependencies
+
+```bash
+sudo apt install gcc make build-essential
+```
+
+## Build
+
+```bash
+make all
+```
+
+## Run
+
+```bash
+make run
+```
+
+## Test
+
+```bash
+make test
+```
+
+## Clean
+
+```bash
+make clean
+```
+
+---
+
+# Sample Output
+
+```text
+━━━ ICU Vital Signs (live) ━━━
+
+Pat.   HR   SpO2   Temp   BP
+P1     78   98     36.8   118
+P2     112  91     38.2   155
+
+[ALERT] Patient 2: Heart Rate High
+[WARN]  Patient 2: High Temperature
+```
+
+---
+
+# System Calls Used
+
+## File I/O
+`open`, `read`, `write`, `lseek`, `close`
+
+## Processes
+`fork`, `execl`, `waitpid`
+
+## Threads
+`pthread_create`, `pthread_join`
+
+## IPC
+`pipe`, `shm_open`, `mmap`, `sem_open`
+
+## Signals
+`sigaction`, `kill`, `alarm`
+
+---
+
+# Normal Vital Ranges
+
+| Vital | Normal Range |
+|---|---|
+| Heart Rate | 60–100 bpm |
+| SpO2 | ≥95% |
+| Temperature | 36.5–37.5°C |
+| Blood Pressure | 90–140 mmHg |
+
+---
+
+# Learning Outcomes
+
+This project helped practice:
+
+- Linux system calls
+- POSIX threads
+- IPC mechanisms
+- Signal handling
+- Synchronization
+- Concurrent programming
+
+---
+
